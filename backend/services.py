@@ -25,6 +25,7 @@ RANDOM_TARGETS = ["261136679", "307210830", "150428135", "441462736", "231663901
 LIGHTKURVE_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "lightkurve"
 PROCESSED_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "processed-lightcurves"
 PROCESSED_CACHE_SECONDS = 24 * 60 * 60
+PROCESSED_CACHE_VERSION = 2
 MAX_SEARCH_POINTS = 50_000
 MAX_ANALYSIS_POINTS = 20_000
 MAX_PLOT_POINTS = 8_000
@@ -114,7 +115,7 @@ def resolve_target(target: str) -> dict:
 def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
     """Download and clean ordinary public TESS light curves for a TIC target."""
     PROCESSED_CACHE.mkdir(parents=True, exist_ok=True)
-    processed_path = PROCESSED_CACHE / f"tic-{tic_id}.npz"
+    processed_path = PROCESSED_CACHE / f"tic-{tic_id}-v{PROCESSED_CACHE_VERSION}.npz"
     if processed_path.exists() and time_module.time() - processed_path.stat().st_mtime < PROCESSED_CACHE_SECONDS:
         with np.load(processed_path) as cached:
             return cached["time"].copy(), cached["flux"].copy(), str(cached["label"].item())
@@ -135,6 +136,19 @@ def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
             selected_author = preferred
             break
 
+    # Some sectors contain both 20-second and 120-second SPOC products. Use a
+    # single product per sector and prefer the cadence closest to 120 seconds,
+    # which retains transit structure without duplicating or exploding points.
+    product_by_sector: dict[str, tuple[int, float]] = {}
+    for index, row in enumerate(selected.table):
+        sector = str(row["mission"])
+        exposure = float(row["exptime"])
+        cadence_distance = abs(np.log(max(exposure, 1) / 120.0))
+        current = product_by_sector.get(sector)
+        if current is None or cadence_distance < current[1]:
+            product_by_sector[sector] = (index, cadence_distance)
+    selected = selected[sorted(product[0] for product in product_by_sector.values())]
+
     LIGHTKURVE_CACHE.mkdir(parents=True, exist_ok=True)
     collection = selected.download_all(download_dir=str(LIGHTKURVE_CACHE))
     if collection is None or len(collection) == 0:
@@ -143,7 +157,14 @@ def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
     cleaned = []
     for curve in collection:
         try:
-            prepared = curve.remove_nans().normalize().flatten(window_length=101, break_tolerance=5)
+            prepared = curve.remove_nans().normalize()
+            cadence_days = float(np.nanmedian(np.diff(prepared.time.value)))
+            window_length = max(101, int(round(1.0 / cadence_days)))
+            if window_length % 2 == 0:
+                window_length += 1
+            maximum_window = len(prepared) - 1 if len(prepared) % 2 == 0 else len(prepared) - 2
+            window_length = min(window_length, maximum_window)
+            prepared = prepared.flatten(window_length=window_length, break_tolerance=5)
             if len(prepared) >= 40:
                 cleaned.append(prepared)
         except Exception:
