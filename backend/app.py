@@ -1,4 +1,4 @@
-"""FastAPI application for interactive TESS signal inspection."""
+"""FastAPI application for interactive transit-signal inspection."""
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,7 +38,7 @@ def random_inspection() -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="No usable public TESS data was available for this star. Please try another.") from exc
+        raise HTTPException(status_code=502, detail="No usable public brightness data was available for this star. Please try another.") from exc
 
 
 @app.get("/api/targets/{target}/inspect")
@@ -50,4 +50,4 @@ def inspect(target: str) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"No TESS data for this star. Please try another.") from exc
+        raise HTTPException(status_code=502, detail="No usable TESS or Kepler data was available for this star. Please try another.") from exc

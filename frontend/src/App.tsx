@@ -33,7 +33,7 @@ export default function App() {
       <h1>Search the stars<br/><em>discover new worlds</em></h1>
       <h3>How it works</h3>
       <p>Search for a star or choose one at random.</p>
-      <p>The latest data is retrieved from NASA’s TESS telescope, which measures how a star’s brightness changes over time.</p>
+      <p>Public observations are retrieved from NASA’s TESS or Kepler mission, which measured how a star’s brightness changes over time.</p>
       <p>The observations are plotted in a light curve graph, and then analyzed for repeating dips of brightness over time that may occur when an orbiting planet passes in front of its star.</p>
       <p>The analysis is then compared with NASA’s catalog of known planets and candidates to identify potential new expoplanets!</p>
       <form onSubmit={submit}><Search size={20}/><input value={query} onChange={e=>setQuery(e.target.value)} aria-label="Star name or TIC ID" placeholder="Try any star name like TOI-1077 or Wasp-46"/><button disabled={loading}>Inspect Star</button></form>
@@ -43,7 +43,7 @@ export default function App() {
       {error&&<div className="error"><AlertTriangle size={18}/>{error}</div>}
     </header>
 
-    {!data&&!loading&&<section className="features"><article><Telescope/><b>Inspect</b><span>Phase-folded TESS observations</span></article><article><Activity/><b>Measure</b><span>Independent transit signal scoring</span></article><article><Database/><b>Compare</b><span>Confirmed planets and TOI candidates</span></article></section>}
+    {!data&&!loading&&<section className="features"><article><Telescope/><b>Inspect</b><span>NASA space-telescope observations</span></article><article><Activity/><b>Measure</b><span>Independent transit signal scoring</span></article><article><Database/><b>Compare</b><span>Confirmed planets and TOI candidates</span></article></section>}
     {loading&&<section className="loading"><div className="loader"/><h2>Gathering data</h2><p>Plotting light curve graph and analyzing patterns…</p></section>}
     {data&&!loading&&<section className="results">
       <div className="result-heading"><div><h2>{data.target.resolved_name}</h2><p>TIC {data.target.tic_id}</p></div><div className="result-comparison"><div className={`result-card signal-card ${tone}`}><small>OUR GRAPH ANALYSIS</small><div><b>{candidateLabel(data.analysis.classification)}</b></div></div><div className="result-card nasa-card"><small>NASA&apos;S OFFICIAL CATALOG</small><b>{catalogFindingLabel(data.catalog.status,data.catalog.planets.length,data.catalog.tois.length)}</b><span>{data.catalog.planets.length} confirmed · {data.catalog.tois.length} candidate records</span></div>{data.catalog.planets.length>0&&!['strong_candidate','possible_candidate'].includes(data.analysis.classification)&&<p className="comparison-note"><AlertTriangle size={16}/><span><b>These results do not conflict.</b> Our graph only checks for planets that cross in front of the star from our viewpoint. Not finding a strong transit-like signal does not mean no planets exist; NASA may have confirmed them using another method.</span></p>}</div></div>

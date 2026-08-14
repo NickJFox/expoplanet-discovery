@@ -1,12 +1,12 @@
-# Transit Lens — TESS Exoplanet Discovery
+# Transit Lens — Exoplanet Transit Discovery
 
-Transit Lens is a full-stack tool for screening public TESS light curves. It resolves general star names through the TESS Input Catalog, independently searches available brightness measurements for a repeating transit-like dip, then separately compares the target with confirmed planets and TESS Objects of Interest in the NASA Exoplanet Archive.
+Transit Lens is a full-stack tool for screening public TESS and Kepler light curves. It independently searches available brightness measurements for a repeating transit-like dip, then separately compares the target with confirmed planets and TESS Objects of Interest in the NASA Exoplanet Archive.
 
 > The signal score is a screening result, not a planet confirmation. Stellar variability, eclipsing binaries, contamination, and instrument artifacts require human vetting and follow-up observations.
 
 ## Features
 
-- Search by TIC ID or general star name when public TESS light-curve data is available
+- Search by TIC ID or general star name when public TESS or Kepler light-curve data is available
 - Choose a random example target
 - Interactive phase-folded light-curve visualization
 - Independent Box Least Squares period search followed by transit depth, SNR, duration, and morphology screening
@@ -63,4 +63,18 @@ Cleaned light curves are cached for 24 hours, and completed inspections are cach
 
 ## Detection approach
 
-The detector does not use catalog status when searching or scoring a graph. It cleans and stitches ordinary public TESS light curves, uses a coarse-to-fine Box Least Squares search to identify the strongest repeating box-shaped dip across periods from 0.5 to 45 days, and folds the measurements on that period. It then estimates out-of-event noise using a robust median absolute deviation and screens signal-to-noise, depth, localized shoulders, and event width. Catalog matching happens afterward. This is intentionally explainable and conservative; a production scientific pipeline should add odd/even tests, secondary-eclipse searches, centroid checks, stellar-radius constraints, and injection/recovery validation.
+The detector does not use catalog status when searching or scoring a graph. It cleans and stitches ordinary public light curves, selecting original Kepler quarters for Kepler/KOI/KIC names and TESS sectors for other targets. It uses a coarse-to-fine Box Least Squares search across the complete observing baseline to identify the strongest repeating box-shaped dip from 0.5 days up to the lesser of 400 days or half the available baseline, and folds the measurements on that period. It then estimates out-of-event noise using a robust median absolute deviation and screens signal-to-noise, depth, localized shoulders, and event width. Catalog matching happens afterward. This is intentionally explainable and conservative; a production scientific pipeline should add odd/even tests, secondary-eclipse searches, centroid checks, stellar-radius constraints, and injection/recovery validation.
+
+### Validation controls
+
+| Target | Appropriate data | Expected interpretation |
+| --- | --- | --- |
+| WASP-46 | TESS | Strong transit-like signal; confirmed transiting planet |
+| TOI-700 | TESS | Transit-like signal; confirmed transiting planets |
+| TRAPPIST-1 | TESS | Short transit-like signal near 1.51 days; confirmed transiting system |
+| Kepler-90 | Kepler | Transit-like signal; confirmed multi-planet system |
+| Proxima Centauri | TESS | No required transit signal; its confirmed planets were found by radial velocity |
+| 51 Pegasi | TESS, when available | No required transit signal; 51 Pegasi b does not transit from our viewpoint |
+| Sirius A | TESS, when available | Negative control; no cataloged confirmed planet |
+
+These controls prevent a single-star threshold tweak from being treated as a general fix. A confirmed planet is not automatically expected to produce a detectable dip: it must transit from our viewing angle, fall within the observations, and be deep enough for that mission’s precision.

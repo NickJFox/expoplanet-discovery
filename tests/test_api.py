@@ -26,6 +26,23 @@ def test_archive_timeout_is_retried() -> None:
     assert attempts == 2
 
 
+def test_short_transit_is_not_replaced_by_unphysical_broad_dip() -> None:
+    rng = np.random.default_rng(42)
+    time = np.linspace(0, 24, 12_000)
+    period = 1.5108
+    phase = ((time + period / 2) % period) - period / 2
+    flux = 1 + rng.normal(0, 0.002, time.size)
+    flux[np.abs(phase) < 0.015] -= 0.012
+    # Broad short-period variability should not be eligible as a 0.4-day
+    # transit at a 0.5-day orbit.
+    flux += 0.001 * np.sin(2 * np.pi * time / 0.5)
+
+    result = services.find_repeating_dip(time, flux)
+
+    assert abs(result["period_days"] - period) < 0.01
+    assert result["duration_days"] <= 0.12
+
+
 def test_resolve_tic_without_remote_request() -> None:
     response = TestClient(app).get("/api/targets/resolve", params={"q": "TIC 261136679"})
     assert response.status_code == 200
@@ -54,17 +71,45 @@ def test_resolve_common_star_name_through_catalog_aliases(monkeypatch) -> None:
 
 
 def test_hyphenated_catalog_name_is_not_mistaken_for_tic_id(monkeypatch) -> None:
-    monkeypatch.setattr(services, "_resolve_tic_target", lambda target: None)
     monkeypatch.setattr(services, "_resolve_catalog_alias", lambda target: {
         "input": target,
         "tic_id": "267667295",
+        "kepler_id": "11442793",
         "resolved_name": "KOI-351",
     })
 
     result = services.resolve_target("Kepler-90")
 
     assert result["tic_id"] == "267667295"
+    assert result["kepler_id"] == "11442793"
     assert result["resolved_name"] == "KOI-351"
+
+
+def test_kepler_target_uses_original_kepler_light_curve(monkeypatch) -> None:
+    monkeypatch.setattr(services, "resolve_target", lambda target: {
+        "input": target,
+        "tic_id": "267667295",
+        "kepler_id": "11442793",
+        "resolved_name": "KOI-351",
+    })
+    used = []
+    monkeypatch.setattr(services, "fetch_kepler_lightcurve", lambda identifier: (
+        used.append(("Kepler", identifier)) or np.linspace(0, 20, 100), np.ones(100), "Kepler test curve"
+    ))
+    monkeypatch.setattr(services, "fetch_tess_lightcurve", lambda identifier: (_ for _ in ()).throw(
+        AssertionError("Kepler target incorrectly used TESS")
+    ))
+    monkeypatch.setattr(services, "find_repeating_dip", lambda *args: {
+        "period_days": 7.0, "duration_days": 0.1, "transit_time": 1.0, "bls_power": 1.0,
+    })
+    monkeypatch.setattr(services, "catalog_matches", lambda *args: {
+        "status": "confirmed", "host_name": "Kepler-90", "planets": [], "tois": [],
+    })
+
+    result = services.inspect_target("Kepler-90")
+
+    assert used == [("Kepler", "11442793")]
+    assert result["data_source"] == "Kepler test curve"
 
 
 def test_resolve_general_star_through_tic_catalog(monkeypatch) -> None:
@@ -93,12 +138,25 @@ def test_catalog_match_follows_legacy_tic_alias(monkeypatch) -> None:
         "tic_id": "388857263",
         "resolved_name": "Proxima Cen",
     })
-    services.catalog_matches.cache_clear()
-
     result = services.catalog_matches("1019422535", "Proxima Centauri")
 
     assert result["status"] == "confirmed"
     assert result["host_name"] == "Proxima Cen"
+
+
+def test_confirmed_planets_survive_toi_catalog_failure(monkeypatch) -> None:
+    def fake_tap(query: str) -> list[dict[str, str]]:
+        if "from toi" in query:
+            raise requests.Timeout("TOI service unavailable")
+        return [{"hostname": "TRAPPIST-1", "pl_name": "TRAPPIST-1 b"}]
+
+    monkeypatch.setattr(services, "_tap", fake_tap)
+
+    result = services.catalog_matches("278892590", "")
+
+    assert result["status"] == "confirmed"
+    assert len(result["planets"]) == 1
+    assert result["tois"] == []
 
 
 def test_inspection_uses_confirmed_planet_host_name(monkeypatch) -> None:
