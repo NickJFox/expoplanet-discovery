@@ -34,7 +34,12 @@ def _robust_noise(values: np.ndarray) -> float:
     return float(max(1.4826 * mad, np.std(values) * 0.25, 1e-8))
 
 
-def analyze_phase_curve(phase_values, flux_values) -> TransitAnalysis:
+def analyze_phase_curve(
+    phase_values,
+    flux_values,
+    expected_center: float | None = None,
+    expected_width: float | None = None,
+) -> TransitAnalysis:
     """Find and score the strongest box-shaped dimming without catalog knowledge."""
     phase = np.asarray(phase_values, dtype=float)
     flux = np.asarray(flux_values, dtype=float)
@@ -53,9 +58,14 @@ def analyze_phase_curve(phase_values, flux_values) -> TransitAnalysis:
 
     best = None
     # Search plausible transit widths. This is independent of the expected phase zero.
-    for fraction in np.geomspace(0.008, 0.12, 18):
-        width = span * float(fraction)
-        for center in np.linspace(float(phase.min()), float(phase.max()), 180):
+    widths = span * np.geomspace(0.001, 0.12, 24)
+    if expected_width is not None and expected_width > 0:
+        widths = np.unique(np.append(widths, expected_width))
+    centers = np.linspace(float(phase.min()), float(phase.max()), 180)
+    if expected_center is not None:
+        centers = np.unique(np.append(centers, expected_center))
+    for width in widths:
+        for center in centers:
             inside = np.abs(phase - center) <= width / 2
             count = int(inside.sum())
             if count < 6 or count > phase.size * 0.25:
@@ -101,11 +111,13 @@ def analyze_phase_curve(phase_values, flux_values) -> TransitAnalysis:
     else:
         reasons.append("The dip does not have clearly defined shoulders.")
     duration_fraction = width / span
-    if 0.008 <= duration_fraction <= 0.08 and snr >= 7:
+    compact_duration = 0.001 <= duration_fraction <= 0.08
+    if compact_duration and snr >= 7:
         score += 10
         reasons.append("The event width is compatible with a compact transit-like feature.")
     score = min(score, 100)
-    classification = "strong_candidate" if score >= 75 else "possible_candidate" if score >= 50 else "weak_signal" if score >= 25 else "no_signal"
+    strong_morphology = snr >= 9 and localized and compact_duration
+    classification = "strong_candidate" if score >= 75 or strong_morphology else "possible_candidate" if score >= 50 else "weak_signal" if score >= 25 else "no_signal"
     return TransitAnalysis(
         classification, score, round(snr, 2), round(depth, 8), int(round(depth * 1_000_000)),
         round(center, 6), round(width, 6), count, round(noise, 8), reasons,

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 import numpy as np
+import requests
 
 from backend.app import app
 from backend import services
@@ -9,6 +10,20 @@ def test_health() -> None:
     response = TestClient(app).get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_archive_timeout_is_retried() -> None:
+    attempts = 0
+
+    def flaky_operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise requests.Timeout("temporary timeout")
+        return "ok"
+
+    assert services.retry_archive_call(flaky_operation) == "ok"
+    assert attempts == 2
 
 
 def test_resolve_tic_without_remote_request() -> None:

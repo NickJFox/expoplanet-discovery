@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&family=Newsreader:ital,wght@1,500&display=swap');
 .result-comparison .signal-card>div b{max-width:260px;font-size:18px}
 .result-comparison .result-card>small{font-size:13px;font-weight:700;line-height:1.25;color:#b7c0d4}
+.comparison-note{grid-column:1/-1;display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 14px;border:1px solid #ffffff14;border-radius:10px;background:#ffffff06;color:#98a3ba;font-size:11px;line-height:1.55}.comparison-note svg{flex:none;margin-top:1px;color:#d7af62}.comparison-note b{color:#c7cfde}
 header>p.search-hint{margin:12px auto 0;color:#7f8aa4;font-size:13px}
 header>p.random-label{margin-top:30px;margin-bottom:0}
 .chart-help{margin:0;padding:0 28px 24px;color:#77839b;font-size:11px;line-height:1.65}

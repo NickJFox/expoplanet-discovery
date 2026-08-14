@@ -10,7 +10,9 @@ export default function LightCurve({ phase, flux, center, width }: { phase: numb
     const yMax = sorted[Math.floor(sorted.length * .99)] ?? Math.max(...flux)
     const x = (v:number) => 55 + (v-xMin)/(xMax-xMin || 1)*890
     const y = (v:number) => 25 + (yMax-v)/(yMax-yMin || 1)*270
-    const binCount = Math.min(140, Math.max(30, Math.floor(Math.sqrt(phase.length))))
+    const phaseSpan = xMax-xMin || 1
+    const binsForEvent = Math.ceil(phaseSpan * 3 / Math.max(width, phaseSpan / 800))
+    const binCount = Math.min(800, Math.max(60, Math.floor(Math.sqrt(phase.length)), binsForEvent))
     const bins = Array.from({length:binCount}, () => [] as {phase:number;flux:number}[])
     phase.forEach((value, i) => {
       const bin = Math.min(binCount-1, Math.floor((value-xMin)/(xMax-xMin || 1)*binCount))
@@ -21,7 +23,7 @@ export default function LightCurve({ phase, flux, center, width }: { phase: numb
       return {phase:bin.reduce((sum,point) => sum+point.phase,0)/bin.length,flux:values[Math.floor(values.length/2)]}
     })
     return {xMin,xMax,yMin,yMax,x,y,trend}
-  }, [phase, flux])
+  }, [phase, flux, width])
   if (!plot) return <div className="empty">No curve data available</div>
   const hovered = cursor === null ? null : phase.reduce((best, value, i) => Math.abs(value-cursor) < Math.abs(phase[best]-cursor) ? i : best, 0)
   return <div className="chart-wrap">

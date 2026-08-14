@@ -31,6 +31,28 @@ MAX_ANALYSIS_POINTS = 20_000
 MAX_PLOT_POINTS = 8_000
 
 
+class ArchiveTimeoutError(RuntimeError):
+    """Raised when a remote astronomy archive times out after retries."""
+
+
+def retry_archive_call(operation, attempts: int = 2):
+    """Retry transient archive timeouts without hiding unrelated failures."""
+    import requests
+
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except Exception as exc:
+            is_timeout = isinstance(exc, (requests.Timeout, requests.ConnectionError)) or "timed out" in str(exc).lower()
+            if not is_timeout:
+                raise
+            if attempt == attempts - 1:
+                raise ArchiveTimeoutError(
+                    "The TESS archive took too long to respond. Please try this search again in a moment."
+                ) from exc
+            time_module.sleep(0.75)
+
+
 def _tap(query: str) -> list[dict[str, str]]:
     import requests
 
@@ -122,7 +144,7 @@ def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
 
     import lightkurve as lk
 
-    search = lk.search_lightcurve(f"TIC {tic_id}", mission="TESS")
+    search = retry_archive_call(lambda: lk.search_lightcurve(f"TIC {tic_id}", mission="TESS"))
     if len(search) == 0:
         raise RuntimeError(f"No public TESS light curve was found for TIC {tic_id}")
 
@@ -150,7 +172,7 @@ def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
     selected = selected[sorted(product[0] for product in product_by_sector.values())]
 
     LIGHTKURVE_CACHE.mkdir(parents=True, exist_ok=True)
-    collection = selected.download_all(download_dir=str(LIGHTKURVE_CACHE))
+    collection = retry_archive_call(lambda: selected.download_all(download_dir=str(LIGHTKURVE_CACHE)))
     if collection is None or len(collection) == 0:
         raise RuntimeError(f"TESS light-curve products for TIC {tic_id} could not be downloaded")
 
@@ -185,19 +207,58 @@ def fetch_tess_lightcurve(tic_id: str) -> tuple[np.ndarray, np.ndarray, str]:
 
 
 def find_repeating_dip(time: np.ndarray, flux: np.ndarray) -> dict[str, float]:
-    """Use Box Least Squares to find the strongest repeating box-shaped dip."""
+    """Use a coarse-to-fine Box Least Squares search for a repeating dip."""
     from astropy.timeseries import BoxLeastSquares
 
-    if time.size > MAX_SEARCH_POINTS:
-        sample = np.linspace(0, time.size - 1, MAX_SEARCH_POINTS, dtype=int)
-        time, flux = time[sample], flux[sample]
+    order = np.argsort(time)
+    time, flux = time[order], flux[order]
     span = float(np.ptp(time))
-    maximum_period = min(30.0, max(1.0, span / 2))
+    maximum_period = min(45.0, max(1.0, span / 2))
     if maximum_period <= 0.5:
         raise RuntimeError("The TESS observations do not cover enough time for a repeating-signal search")
 
-    periods = np.geomspace(0.5, maximum_period, 1200)
-    result = BoxLeastSquares(time, flux).power(periods, [0.04, 0.08, 0.12, 0.2, 0.3])
+    # A multi-year baseline requires extremely fine period spacing, but searching
+    # that entire grid directly is expensive. Find candidates in the densest
+    # 80-day observing window, then refine those candidates across all sectors.
+    window_days = min(80.0, span)
+    left = 0
+    best_left, best_right = 0, time.size - 1
+    best_count = 0
+    for right in range(time.size):
+        while time[right] - time[left] > window_days:
+            left += 1
+        if right - left + 1 > best_count:
+            best_left, best_right, best_count = left, right, right - left + 1
+    coarse_time = time[best_left:best_right + 1]
+    coarse_flux = flux[best_left:best_right + 1]
+    if coarse_time.size > 30_000:
+        sample = np.linspace(0, coarse_time.size - 1, 30_000, dtype=int)
+        coarse_time, coarse_flux = coarse_time[sample], coarse_flux[sample]
+
+    durations = [0.04, 0.08, 0.12, 0.2, 0.3, 0.4]
+    coarse_periods = np.geomspace(0.5, maximum_period, 5_000)
+    coarse = BoxLeastSquares(coarse_time, coarse_flux).power(coarse_periods, durations)
+    candidates: list[float] = []
+    for index in np.argsort(coarse.power)[::-1]:
+        period = float(coarse_periods[index])
+        if all(abs(period - existing) / existing > 0.01 for existing in candidates):
+            candidates.append(period)
+        if len(candidates) == 16:
+            break
+
+    if time.size > MAX_SEARCH_POINTS:
+        sample = np.linspace(0, time.size - 1, MAX_SEARCH_POINTS, dtype=int)
+        search_time, search_flux = time[sample], flux[sample]
+    else:
+        search_time, search_flux = time, flux
+    refined_grids = []
+    for period in candidates:
+        position = int(np.searchsorted(coarse_periods, period))
+        low = coarse_periods[max(0, position - 2)]
+        high = coarse_periods[min(coarse_periods.size - 1, position + 2)]
+        refined_grids.append(np.linspace(low, high, 240))
+    refined_periods = np.unique(np.concatenate(refined_grids))
+    result = BoxLeastSquares(search_time, search_flux).power(refined_periods, durations)
     index = int(np.nanargmax(result.power))
     return {
         "period_days": float(result.period[index]),
@@ -282,9 +343,19 @@ def inspect_target(target: str) -> dict:
     phases = ((times - epoch + period / 2) % period) - period / 2
     if phases.size > MAX_ANALYSIS_POINTS:
         analysis_sample = np.linspace(0, phases.size - 1, MAX_ANALYSIS_POINTS, dtype=int)
-        analysis = analyze_phase_curve(phases[analysis_sample], normalized[analysis_sample])
+        analysis = analyze_phase_curve(
+            phases[analysis_sample],
+            normalized[analysis_sample],
+            expected_center=0.0,
+            expected_width=detection["duration_days"],
+        )
     else:
-        analysis = analyze_phase_curve(phases, normalized)
+        analysis = analyze_phase_curve(
+            phases,
+            normalized,
+            expected_center=0.0,
+            expected_width=detection["duration_days"],
+        )
     points = prepare_curve_points(phases, normalized)
     if catalog["host_name"]:
         resolved["resolved_name"] = catalog["host_name"]
