@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gc
 import io
 import random
 import re
@@ -26,7 +27,7 @@ PROCESSED_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "processed-li
 PROCESSED_CACHE_SECONDS = 24 * 60 * 60
 PROCESSED_CACHE_VERSION = 3
 MAX_ARCHIVE_PRODUCTS = 4
-MAX_SEARCH_POINTS = 10_000
+MAX_SEARCH_POINTS = 5_000
 MAX_ANALYSIS_POINTS = 10_000
 MAX_PLOT_POINTS = 8_000
 
@@ -200,13 +201,18 @@ def fetch_archive_lightcurve(identifier: str, mission: str = "TESS") -> tuple[np
     selected = selected[product_indices]
 
     LIGHTKURVE_CACHE.mkdir(parents=True, exist_ok=True)
-    collection = retry_archive_call(lambda: selected.download_all(download_dir=str(LIGHTKURVE_CACHE)))
-    if collection is None or len(collection) == 0:
-        raise RuntimeError(f"{display_mission} light-curve products for {search_target} could not be downloaded")
-
-    cleaned = []
-    for curve in collection:
+    cleaned_times: list[np.ndarray] = []
+    cleaned_fluxes: list[np.ndarray] = []
+    for product_index in range(len(selected)):
         try:
+            # download_all retains every raw FITS-backed LightCurve plus every
+            # cleaned copy at once. Process products individually so Render's
+            # 512 MB instance only holds one raw product at a time.
+            curve = retry_archive_call(
+                lambda index=product_index: selected[index].download(download_dir=str(LIGHTKURVE_CACHE))
+            )
+            if curve is None:
+                continue
             prepared = curve.remove_nans().normalize()
             cadence_days = float(np.nanmedian(np.diff(prepared.time.value)))
             window_length = max(101, int(round(1.0 / cadence_days)))
@@ -216,21 +222,32 @@ def fetch_archive_lightcurve(identifier: str, mission: str = "TESS") -> tuple[np
             window_length = min(window_length, maximum_window)
             prepared = prepared.flatten(window_length=window_length, break_tolerance=5)
             if len(prepared) >= 40:
-                cleaned.append(prepared)
+                product_time = np.asarray(prepared.time.value, dtype=float)
+                product_flux = np.asarray(prepared.flux.value, dtype=float)
+                finite = np.isfinite(product_time) & np.isfinite(product_flux)
+                cleaned_times.append(product_time[finite].copy())
+                cleaned_fluxes.append(product_flux[finite].copy())
         except Exception:
             continue
-    if not cleaned:
+        finally:
+            # Release FITS and LightCurve objects before downloading the next
+            # archive product instead of waiting for a later collection cycle.
+            if "prepared" in locals():
+                del prepared
+            if "curve" in locals():
+                del curve
+            gc.collect()
+    if not cleaned_times:
         raise RuntimeError(f"No usable {display_mission} brightness measurements were available for {search_target}")
 
-    stitched = lk.LightCurveCollection(cleaned).stitch()
-    time = np.asarray(stitched.time.value, dtype=float)
-    flux = np.asarray(stitched.flux.value, dtype=float)
+    time = np.concatenate(cleaned_times)
+    flux = np.concatenate(cleaned_fluxes)
     finite = np.isfinite(time) & np.isfinite(flux)
     time, flux = time[finite], flux[finite]
     if time.size < 40:
         raise RuntimeError(f"Fewer than 40 usable {display_mission} brightness measurements were available for {search_target}")
     product_label = "quarter" if is_kepler else "sector"
-    label = f"{display_mission} light curve · {selected_author} · {len(cleaned)} {product_label} product(s)"
+    label = f"{display_mission} light curve · {selected_author} · {len(cleaned_times)} {product_label} product(s)"
     np.savez_compressed(processed_path, time=time, flux=flux, label=label)
     return time, flux, label
 
@@ -276,7 +293,7 @@ def find_repeating_dip(time: np.ndarray, flux: np.ndarray) -> dict[str, float]:
     ]
     coarse_model = BoxLeastSquares(coarse_time, coarse_flux)
     candidates: list[tuple[float, float, float, list[float]]] = []
-    total_period_count = 6_000 if maximum_period > 45 else 3_000
+    total_period_count = 3_000 if maximum_period > 45 else 2_000
     total_log_span = np.log(maximum_period / 0.5)
     for low_period, high_period, durations in bands:
         if high_period <= low_period:
