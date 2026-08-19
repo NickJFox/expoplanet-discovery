@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: exoplanet-discovery
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && npm ci --prefix frontend && npm run build --prefix frontend
+    startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11

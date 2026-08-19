@@ -1,7 +1,10 @@
 """FastAPI application for interactive transit-signal inspection."""
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .services import ArchiveTimeoutError, inspect_target, random_target, resolve_target
 
@@ -51,3 +54,10 @@ def inspect(target: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="No usable TESS or Kepler data was available for this star. Please try another.") from exc
+
+
+# In production, Render builds the Vite frontend and FastAPI serves it from the
+# same process. Keeping this mount last ensures that /api routes take priority.
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+if FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

@@ -50,6 +50,16 @@ python3 -m pytest
 cd frontend && npm run build
 ```
 
+## Deploy free on Render
+
+The included `render.yaml` deploys the frontend and API together as one free
+Render web service. Push the repository to GitHub, open Render's Blueprint
+creation page, connect the repository, and apply the detected blueprint.
+
+Render builds the Vite frontend and FastAPI serves it alongside `/api`. Free
+services sleep after periods of inactivity, so the first visit may take about a
+minute to start and downloaded light-curve caches are temporary.
+
 ## API
 
 - `GET /api/health`
