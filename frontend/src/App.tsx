@@ -24,7 +24,7 @@ const durationLabel = (days:number) => days < 2 ? `${(days*24).toFixed(1)} hours
 export default function App() {
   const [query,setQuery]=useState(''), [data,setData]=useState<Inspection|null>(null)
   const [loading,setLoading]=useState(false), [error,setError]=useState('')
-  async function load(path:string) { setLoading(true); setError(''); try { const r=await fetch(path); const body=await r.json(); if(!r.ok) throw new Error(body.detail||'The request failed'); setData(body) } catch(e) { setError(e instanceof Error?e.message:'The request failed') } finally { setLoading(false) } }
+  async function load(path:string) { setLoading(true); setError(''); try { const r=await fetch(path); const text=await r.text(); let body; try { body=JSON.parse(text) } catch { throw new Error('The astronomy server stopped before completing the analysis. Please try again with another star.') } if(!r.ok) throw new Error(body.detail||'The request failed'); setData(body) } catch(e) { setError(e instanceof Error?e.message:'The request failed') } finally { setLoading(false) } }
   function submit(e:FormEvent){e.preventDefault(); if(query.trim()) load(`/api/targets/${encodeURIComponent(query.trim())}/inspect`)}
   const tone=data?.analysis.classification==='strong_candidate'?'strong':data?.analysis.classification==='possible_candidate'?'possible':'quiet'
   return <main>

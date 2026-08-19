@@ -7,7 +7,6 @@ import io
 import random
 import re
 import time as time_module
-from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -26,8 +25,9 @@ LIGHTKURVE_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "lightkurve"
 PROCESSED_CACHE = Path(__file__).resolve().parents[1] / ".cache" / "processed-lightcurves"
 PROCESSED_CACHE_SECONDS = 24 * 60 * 60
 PROCESSED_CACHE_VERSION = 3
-MAX_SEARCH_POINTS = 30_000
-MAX_ANALYSIS_POINTS = 20_000
+MAX_ARCHIVE_PRODUCTS = 4
+MAX_SEARCH_POINTS = 10_000
+MAX_ANALYSIS_POINTS = 10_000
 MAX_PLOT_POINTS = 8_000
 
 
@@ -148,7 +148,6 @@ def resolve_target(target: str) -> dict:
     return {"input": target, "tic_id": tic_id, "resolved_name": rows[0]["hostname"]}
 
 
-@lru_cache(maxsize=32)
 def fetch_archive_lightcurve(identifier: str, mission: str = "TESS") -> tuple[np.ndarray, np.ndarray, str]:
     """Download and clean public TESS or Kepler light curves."""
     mission = mission.upper()
@@ -190,7 +189,15 @@ def fetch_archive_lightcurve(identifier: str, mission: str = "TESS") -> tuple[np
         current = product_by_sector.get(sector)
         if current is None or cadence_distance < current[1]:
             product_by_sector[sector] = (index, cadence_distance)
-    selected = selected[sorted(product[0] for product in product_by_sector.values())]
+    product_indices = sorted(product[0] for product in product_by_sector.values())
+    # Render's free instance has a 512 MB memory ceiling. Loading every sector
+    # for frequently observed stars can exceed it, so use a representative set
+    # spread across the available baseline. Four products still provide useful
+    # multi-event screening while keeping lightkurve's peak memory bounded.
+    if len(product_indices) > MAX_ARCHIVE_PRODUCTS:
+        representative = np.linspace(0, len(product_indices) - 1, MAX_ARCHIVE_PRODUCTS, dtype=int)
+        product_indices = [product_indices[index] for index in representative]
+    selected = selected[product_indices]
 
     LIGHTKURVE_CACHE.mkdir(parents=True, exist_ok=True)
     collection = retry_archive_call(lambda: selected.download_all(download_dir=str(LIGHTKURVE_CACHE)))
@@ -254,8 +261,8 @@ def find_repeating_dip(time: np.ndarray, flux: np.ndarray) -> dict[str, float]:
     # invisible to candidate selection. A representative sample keeps this
     # broad scan bounded, and the second pass restores fine period precision.
     coarse_time, coarse_flux = time, flux
-    if coarse_time.size > 30_000:
-        sample = np.linspace(0, coarse_time.size - 1, 30_000, dtype=int)
+    if coarse_time.size > MAX_SEARCH_POINTS:
+        sample = np.linspace(0, coarse_time.size - 1, MAX_SEARCH_POINTS, dtype=int)
         coarse_time, coarse_flux = coarse_time[sample], coarse_flux[sample]
 
     # Transit duration must stay small relative to orbital period. A single
@@ -269,7 +276,7 @@ def find_repeating_dip(time: np.ndarray, flux: np.ndarray) -> dict[str, float]:
     ]
     coarse_model = BoxLeastSquares(coarse_time, coarse_flux)
     candidates: list[tuple[float, float, float, list[float]]] = []
-    total_period_count = 20_000 if maximum_period > 45 else 6_000
+    total_period_count = 6_000 if maximum_period > 45 else 3_000
     total_log_span = np.log(maximum_period / 0.5)
     for low_period, high_period, durations in bands:
         if high_period <= low_period:
@@ -396,14 +403,14 @@ def catalog_matches(tic_id: str, target_name: str = "") -> dict:
 def inspect_target(target: str) -> dict:
     resolved = resolve_target(target)
     tic_id = resolved["tic_id"]
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        if resolved.get("kepler_id"):
-            curve_future = executor.submit(fetch_kepler_lightcurve, resolved["kepler_id"])
-        else:
-            curve_future = executor.submit(fetch_tess_lightcurve, tic_id)
-        catalog_future = executor.submit(catalog_matches, tic_id, target.strip())
-        times, fluxes, label = curve_future.result()
-        catalog = catalog_future.result()
+    # Run these sequentially on memory-constrained hobby hosting. Concurrent
+    # archive clients increase peak memory enough to trigger Render's 512 MB
+    # out-of-memory kill while lightkurve is processing FITS products.
+    if resolved.get("kepler_id"):
+        times, fluxes, label = fetch_kepler_lightcurve(resolved["kepler_id"])
+    else:
+        times, fluxes, label = fetch_tess_lightcurve(tic_id)
+    catalog = catalog_matches(tic_id, target.strip())
     normalized = prepare_flux_for_plot(fluxes)
     detection = find_repeating_dip(times, normalized)
     period = detection["period_days"]
