@@ -20,14 +20,43 @@ const catalogFindingLabel = (value:string, planets:number, tois:number) => {
   return label(value)
 }
 const durationLabel = (days:number) => days < 2 ? `${(days*24).toFixed(1)} hours` : `${days.toFixed(2)} days`
+const loadingStages = [
+  'Waking up server',
+  'Retrieving observations from telescope',
+  'Plotting data into a graph',
+  'Analyzing patterns',
+]
 
 export default function App() {
   const [query,setQuery]=useState(''), [data,setData]=useState<Inspection|null>(null)
   const [loading,setLoading]=useState(false), [error,setError]=useState('')
+  const [loadingStage,setLoadingStage]=useState(0)
   // Render's free API sleeps when idle. Wake it in the background as soon as
   // the static page opens, without delaying or changing the initial UI.
   useEffect(() => { void fetch('/api/health').catch(() => undefined) }, [])
-  async function load(path:string) { setLoading(true); setError(''); try { const r=await fetch(path); const text=await r.text(); let body; try { body=JSON.parse(text) } catch { throw new Error('The astronomy server stopped before completing the analysis. Please try again with another star.') } if(!r.ok) throw new Error(body.detail||'The request failed'); setData(body) } catch(e) { setError(e instanceof Error?e.message:'The request failed') } finally { setLoading(false) } }
+  async function load(path:string) {
+    setLoading(true)
+    setLoadingStage(0)
+    setError('')
+    const timers:number[]=[]
+    try {
+      await fetch('/api/health',{cache:'no-store'})
+      setLoadingStage(1)
+      timers.push(window.setTimeout(()=>setLoadingStage(2),5000))
+      timers.push(window.setTimeout(()=>setLoadingStage(3),12000))
+      const r=await fetch(path)
+      const text=await r.text()
+      let body
+      try { body=JSON.parse(text) } catch { throw new Error('The astronomy server stopped before completing the analysis. Please try again with another star.') }
+      if(!r.ok) throw new Error(body.detail||'The request failed')
+      setData(body)
+    } catch(e) {
+      setError(e instanceof Error?e.message:'The request failed')
+    } finally {
+      timers.forEach(window.clearTimeout)
+      setLoading(false)
+    }
+  }
   function submit(e:FormEvent){e.preventDefault(); if(query.trim()) load(`/api/targets/${encodeURIComponent(query.trim())}/inspect`)}
   const tone=data?.analysis.classification==='strong_candidate'?'strong':data?.analysis.classification==='possible_candidate'?'possible':'quiet'
   return <main>
@@ -47,7 +76,7 @@ export default function App() {
     </header>
 
     {!data&&!loading&&<section className="features"><article><Telescope/><b>Inspect</b><span>NASA space-telescope observations</span></article><article><Activity/><b>Measure</b><span>Independent transit signal scoring</span></article><article><Database/><b>Compare</b><span>Confirmed planets and TOI candidates</span></article></section>}
-    {loading&&<section className="loading"><div className="loader"/><h2>Gathering data</h2><p>Plotting light curve graph and analyzing patterns…</p></section>}
+    {loading&&<section className="loading"><h2>Gathering data</h2><p>This can take a minute for a new star.</p><div className="loading-stages">{loadingStages.map((stage,index)=><div className={`loading-stage ${index<loadingStage?'complete':index===loadingStage?'active':''}`} key={stage}><div className="loading-track"><span/></div><div className="loading-stage-label"><span>{index<loadingStage?'✓':index+1}</span>{stage}</div></div>)}</div></section>}
     {data&&!loading&&<section className="results">
       <div className="result-heading"><div><h2>{data.target.resolved_name}</h2><p>TIC {data.target.tic_id}</p></div><div className="result-comparison"><div className={`result-card signal-card ${tone}`}><small>OUR GRAPH ANALYSIS</small><div><b>{candidateLabel(data.analysis.classification)}</b></div></div><div className="result-card nasa-card"><small>NASA&apos;S OFFICIAL CATALOG</small><b>{catalogFindingLabel(data.catalog.status,data.catalog.planets.length,data.catalog.tois.length)}</b><span>{data.catalog.planets.length} confirmed · {data.catalog.tois.length} candidate records</span></div>{data.catalog.planets.length>0&&!['strong_candidate','possible_candidate'].includes(data.analysis.classification)&&<p className="comparison-note"><AlertTriangle size={16}/><span><b>These results do not conflict.</b> Our graph only checks for planets that cross in front of the star from our viewpoint. Not finding a strong transit-like signal does not mean no planets exist; NASA may have confirmed them using another method.</span></p>}</div></div>
       <div className="chart-card"><div className="card-head"><div><h3>Brightness around the possible transit</h3><p>Our search found its strongest repeating pattern every {data.detection.period_days.toFixed(2)} days. The highlighted area shows the strongest dip.</p></div><span className="pill">{data.observation_count.toLocaleString()} usable brightness measurements</span></div><LightCurve phase={data.curve.phase} flux={data.curve.flux} center={data.analysis.phase_center} width={data.analysis.duration_phase}/></div>
