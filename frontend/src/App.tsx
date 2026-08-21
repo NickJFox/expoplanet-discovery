@@ -36,7 +36,7 @@ export default function App() {
       <h1>Search the stars<br/><em>discover new worlds</em></h1>
       <h3>How it works</h3>
       <p>Search for a star or choose one at random.</p>
-      <p>Public observations are retrieved from NASA’s TESS or Kepler mission, which measured how a star’s brightness changes over time.</p>
+      <p>Observations are retrieved from NASA’s TESS telescope, which measure how a star’s brightness changes over time.</p>
       <p>The observations are plotted in a light curve graph, and then analyzed for repeating dips of brightness over time that may occur when an orbiting planet passes in front of its star.</p>
       <p>The analysis is then compared with NASA’s catalog of known planets and candidates to identify potential new expoplanets!</p>
       <form onSubmit={submit}><Search size={20}/><input value={query} onChange={e=>setQuery(e.target.value)} aria-label="Star name or TIC ID" placeholder="Try any star name like TOI-1077 or Wasp-46"/><button disabled={loading}>Inspect Star</button></form>
