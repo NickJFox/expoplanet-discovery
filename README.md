@@ -52,13 +52,17 @@ cd frontend && npm run build
 
 ## Deploy free on Render
 
-The included `render.yaml` deploys the frontend and API together as one free
-Render web service. Push the repository to GitHub, open Render's Blueprint
-creation page, connect the repository, and apply the detected blueprint.
+The included `render.yaml` deploys two services: the React frontend as an
+always-available static site and the FastAPI backend as a free web service.
+Push the repository to GitHub, open Render's Blueprint creation page, connect
+the repository, and apply (or sync) the detected blueprint. Use the
+`exoplanet-discovery-frontend` URL as the public site.
 
-Render builds the Vite frontend and FastAPI serves it alongside `/api`. Free
-services sleep after periods of inactivity, so the first visit may take about a
-minute to start and downloaded light-curve caches are temporary.
+The static frontend is served immediately from Render's CDN and starts waking
+the API in the background. Free API services sleep after 15 minutes of
+inactivity, so the first analysis can still wait roughly a minute for the API;
+avoiding that cold start entirely requires a paid API instance. Downloaded
+light-curve caches are temporary on the free service.
 
 ## API
 

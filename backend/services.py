@@ -14,9 +14,8 @@ from urllib.parse import quote
 
 import numpy as np
 
-from main import normalize_target, prepare_flux_for_plot, request_json
-
 from .analysis import analyze_phase_curve
+from .utils import normalize_target, prepare_flux_for_plot, request_json
 
 
 NASA_TAP = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync"

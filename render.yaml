@@ -10,3 +10,18 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.11
+
+  # Serve the UI from Render's CDN so it remains immediately available even
+  # while the free Python API is waking from an idle spin-down.
+  - type: web
+    name: exoplanet-discovery-frontend
+    runtime: static
+    buildCommand: npm ci --prefix frontend && npm run build --prefix frontend
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://exoplanet-discovery.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
