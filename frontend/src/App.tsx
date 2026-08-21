@@ -5,10 +5,10 @@ import type { Inspection } from './types'
 
 const label = (value:string) => value.replaceAll('_',' ').replace(/\b\w/g, c => c.toUpperCase())
 const candidateLabel = (value:string) => ({
-  strong_candidate: 'Strong Transit-Like Signal',
-  possible_candidate: 'Possible Transit-Like Signal',
-  weak_signal: 'Weak Transit-Like Signal',
-  no_signal: 'No Strong Transit-Like Signal',
+  strong_candidate: 'Strong Candidate for Planet',
+  possible_candidate: 'Possible Candidate for Planet',
+  weak_signal: 'Weak Signal for Planet',
+  no_signal: 'No Signal for Planet',
   insufficient_data: 'Insufficient Data',
 }[value] ?? label(value))
 const catalogFindingLabel = (value:string, planets:number, tois:number) => {
